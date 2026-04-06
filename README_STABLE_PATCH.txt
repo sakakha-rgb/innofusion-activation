@@ -1,0 +1,1 @@
+Stable patch: keeps original activation/login and only fixes MOGRT scan/import. Also adds src/CSInterface.js so activation keeps working.

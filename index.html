@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' 'unsafe-eval' data: blob:; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'">
+    <title>iNNO FUSION</title>
+    <link rel="stylesheet" href="./styles.css">
+    <style>
+        #loadingOverlay {
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: #0f0f0f;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 9999;
+            color: #00d4aa;
+            font-family: sans-serif;
+        }
+        .loading-spinner {
+            width: 40px;
+            height: 40px;
+            border: 3px solid #333;
+            border-top-color: #00d4aa;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-right: 15px;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+    </style>
+</head>
+<body>
+    <!-- Loading Overlay -->
+    <div id="loadingOverlay">
+        <div class="loading-spinner"></div>
+        <span>Initializing iNNO FUSION...</span>
+    </div>
+
+    <!-- Login Screen -->
+    <div id="loginScreen" class="screen active">
+        <div class="login-container">
+            <div class="logo-placeholder">
+                <image src="./logoi.svg"
+                <svg width="120" height="120" viewBox="0 0 120 120" fill="none">
+                    <rect width="120" height="120" rx="20"/>
+                </svg>
+            </div>
+            <h1>iNNO FUSION</h1>
+            <p class="subtitle">Motion Graphics Library</p>
+            
+            <div class="login-form">
+                <input type="text" id="licenseKey" placeholder="Enter License Key" maxlength="19" autocomplete="off">
+                <button id="activateBtn" class="btn-primary">Activate</button>
+                <p class="error-msg" id="loginError"></p>
+                <a href="#" class="purchase-link" id="purchaseLink">Don't have a license? Purchase Now</a>
+                <p style="margin-top: 15px; font-size: 11px; color: #666; cursor: pointer;" id="autoFillDemo">
+                    👆 Click here to auto-fill demo key
+                </p>
+            </div>
+            
+            <div class="version">v1.0.2</div>
+        </div>
+    </div>
+    <!-- Main App Screen -->
+    <div id="mainScreen" class="screen">
+        <header class="app-header">
+            <div class="header-logo-placeholder">
+                <image src="./logoi.svg"
+                <svg width="28" height="28" viewBox="0 0 120 120" fill="none">
+                </svg>
+            </div>
+            <span class="header-title">iNNO FUSION</span>
+            <span class="tier-badge" id="tierBadge">PRO</span>
+            <div class="header-actions">
+                <button id="refreshBtn" class="btn-icon" title="Refresh Library">&#x21bb;</button>
+                <button id="settingsBtn" class="btn-icon" title="Settings">&#x2699;</button>
+                <button id="logoutBtn" class="btn-icon" title="Logout">&#x2192;</button>
+            </div>
+        </header>
+
+        <div class="search-bar">
+            <input type="text" id="searchInput" placeholder="Search templates...">
+            <div class="filters">
+                <select id="categoryFilter">
+                    <option value="all">All Categories</option>
+                </select>
+                <select id="sortFilter">
+                    <option value="newest">Newest First</option>
+                    <option value="name">Name A-Z</option>
+                </select>
+            </div>
+        </div>
+
+        <div class="main-layout">
+            <aside class="sidebar">
+                <h3>Folders</h3>
+                <ul id="folderList" class="folder-tree">
+                    <li class="folder-item active" data-folder="all">
+                        <span class="folder-icon">&#128193;</span>
+                        <span>All Templates</span>
+                    </li>
+                </ul>
+            </aside>
+
+            <main class="content-area">
+                <div id="templateGrid" class="template-grid">
+                    <div class="loading-state">
+                        <div class="spinner"></div>
+                        <p>Loading templates...</p>
+                    </div>
+                </div>
+                
+                <div id="emptyState" class="empty-state hidden">
+                    <p>No templates found</p>
+                    <button id="scanBtn" class="btn-secondary">Scan for MOGRTs</button>
+                </div>
+            </main>
+        </div>
+
+        <div id="previewModal" class="modal hidden">
+            <div class="modal-content">
+                <span class="close-btn">&times;</span>
+                <div class="preview-container">
+                    <video id="previewVideo" loop muted></video>
+                    <div class="preview-placeholder" id="previewPlaceholder">
+                        <img src="" alt="Template Preview">
+                    </div>
+                </div>
+                <div class="template-info">
+                    <h2 id="templateName">Template Name</h2>
+                    <p id="templateCategory">Category</p>
+                    <div class="template-meta">
+                        <span id="templateDuration">00:00:00:00</span>
+                        <span id="templateSize">1920x1080</span>
+                    </div>
+                    <button id="importBtn" class="btn-primary btn-large">Import to Timeline</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Scripts loaded with defer to ensure CEP is ready -->
+    <script src="./CSInterface.js"></script>
+    
+    <script>
+        // Wait for CEP to be fully ready before loading other scripts
+        function loadScript(src) {
+            return new Promise((resolve, reject) => {
+                const script = document.createElement('script');
+                script.src = src;
+                script.onload = () => {
+                    console.log('Loaded:', src);
+                    resolve();
+                };
+                script.onerror = () => {
+                    console.error('Failed to load:', src);
+                    reject(new Error('Failed to load ' + src));
+                };
+                document.head.appendChild(script);
+            });
+        }
+        
+        // Check if CEP is ready
+        function waitForCEP() {
+            return new Promise((resolve) => {
+                if (typeof window.__adobe_cep__ !== 'undefined') {
+                    console.log('CEP is ready');
+                    resolve();
+                } else {
+                    console.log('Waiting for CEP...');
+                    let attempts = 0;
+                    const check = setInterval(() => {
+                        attempts++;
+                        if (typeof window.__adobe_cep__ !== 'undefined') {
+                            clearInterval(check);
+                            console.log('CEP ready after', attempts, 'attempts');
+                            resolve();
+                        } else if (attempts > 50) { // 5 seconds timeout
+                            clearInterval(check);
+                            console.warn('CEP not available, continuing in browser mode');
+                            resolve();
+                        }
+                    }, 100);
+                }
+            });
+        }
+        
+        // Initialize app
+        async function initApp() {
+            try {
+                await waitForCEP();
+                await loadScript('./LicenseManager.js');
+                await loadScript('./MogrtScanner.js');
+                await loadScript('./PremiereBridge.js');
+                await loadScript('./index.js');
+                
+                // Hide loading overlay
+                const overlay = document.getElementById('loadingOverlay');
+                if (overlay) overlay.style.display = 'none';
+                
+            } catch (e) {
+                console.error('Initialization failed:', e);
+                document.getElementById('loadingOverlay').innerHTML = 
+                    '<div style="color:#ff4757;padding:20px;">Error loading: ' + e.message + '</div>';
+            }
+        }
+        
+        // Start initialization
+        initApp();
+    </script>
+</body>
+</html>
