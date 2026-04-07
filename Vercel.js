@@ -1,7 +1,7 @@
 // admin-generate.js - Run this with Node.js to generate keys
 const fetch = require('node-fetch');
 
-const VERCEL_URL = 'https://innofusion4.vercel.app';
+const VERCEL_URL = 'https://innofusion-activation.vercel.app';  
 const ADMIN_SECRET = 'your-admin-secret-here'; // Set this in Vercel env vars
 
 async function generateLicenses(count = 10, tier = 'PRO', months = 12) {
