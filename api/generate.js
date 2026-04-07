@@ -1,23 +1,19 @@
-// api/generate.js - Protected endpoint to create new licenses
+// api/generate.js - Generate new license keys (protected)
 const { connectToDatabase } = require('../lib/db');
-const crypto = require('crypto');
 
-// Simple admin auth (use proper auth in production!)
-const ADMIN_SECRET = process.env.ADMIN_SECRET;
-
-function generateLicenseKey() {
-  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // Removed confusing chars (0,O,I,1)
-  const segments = [];
+// Generate random key: INNO-XXXX-XXXX-XXXX
+function generateKey() {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // No 0, O, I, 1
+  let result = 'INNO-';
   
-  for (let i = 0; i < 3; i++) {
-    let segment = '';
-    for (let j = 0; j < 4; j++) {
-      segment += chars.charAt(Math.floor(Math.random() * chars.length));
+  for (let segment = 0; segment < 3; segment++) {
+    for (let i = 0; i < 4; i++) {
+      result += chars.charAt(Math.floor(Math.random() * chars.length));
     }
-    segments.push(segment);
+    if (segment < 2) result += '-';
   }
   
-  return `INNO-${segments.join('-')}`;
+  return result;
 }
 
 module.exports = async (req, res) => {
@@ -25,43 +21,45 @@ module.exports = async (req, res) => {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  // Simple auth check
-  const authHeader = req.headers.authorization;
-  if (!authHeader || authHeader !== `Bearer ${ADMIN_SECRET}`) {
+  // Simple auth - check admin secret
+  const adminSecret = process.env.ADMIN_SECRET;
+  const providedSecret = req.headers.authorization?.replace('Bearer ', '');
+  
+  if (!adminSecret || providedSecret !== adminSecret) {
     return res.status(401).json({ error: 'Unauthorized' });
   }
 
   try {
     const { 
-      count = 1,           // How many keys to generate
-      tier = 'PRO',        // PRO, BASIC, MONTHLY, YEARLY
-      durationMonths = 12, // How long until expiry
-      maxActivations = 1,  // How many computers can use this key
-      notes = ''           // Optional notes (customer email, order ID, etc.)
+      count = 1,
+      tier = 'PRO',
+      months = 12,
+      maxActivations = 1,
+      notes = ''
     } = req.body;
 
     const db = await connectToDatabase();
     const licenses = db.collection('licenses');
 
-    const generatedKeys = [];
+    const generated = [];
     const now = new Date();
     const expiresAt = new Date(now);
-    expiresAt.setMonth(expiresAt.getMonth() + parseInt(durationMonths));
+    expiresAt.setMonth(expiresAt.getMonth() + parseInt(months));
 
     for (let i = 0; i < count; i++) {
       let key;
       let exists = true;
       
-      // Ensure unique key
+      // Ensure unique
       while (exists) {
-        key = generateLicenseKey();
+        key = generateKey();
         exists = await licenses.findOne({ licenseKey: key });
       }
 
-      const licenseDoc = {
+      const doc = {
         licenseKey: key,
         tier,
-        status: 'active', // Not used yet
+        status: 'active',
         createdAt: now,
         expiresAt,
         maxActivations: parseInt(maxActivations),
@@ -71,23 +69,23 @@ module.exports = async (req, res) => {
         notes,
         metadata: {
           generatedBy: 'admin',
-          generationIp: req.headers['x-forwarded-for'] || req.socket.remoteAddress
+          ip: req.headers['x-forwarded-for'] || req.socket?.remoteAddress
         }
       };
 
-      await licenses.insertOne(licenseDoc);
-      generatedKeys.push({
+      await licenses.insertOne(doc);
+      generated.push({
         key,
         tier,
-        expiresAt,
-        maxActivations
+        expiresAt: expiresAt.toISOString().split('T')[0],
+        maxActivations: parseInt(maxActivations)
       });
     }
 
     res.json({
       success: true,
-      generated: generatedKeys.length,
-      keys: generatedKeys
+      generated: generated.length,
+      keys: generated
     });
 
   } catch (error) {

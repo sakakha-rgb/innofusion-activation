@@ -1,38 +1,45 @@
 const { connectToDatabase } = require('../lib/db');
 
-// CORS headers helper
-function setCorsHeaders(res) {
+function setCors(res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-  res.setHeader('Access-Control-Max-Age', '86400');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 }
 
 module.exports = async (req, res) => {
-  // Set CORS headers for ALL requests
-  setCorsHeaders(res);
-
-  // Handle preflight OPTIONS request
+  setCors(res);
+  
   if (req.method === 'OPTIONS') {
     return res.status(200).end();
   }
-
+  
   if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Method not allowed' });
+    return res.status(405).json({ success: false, error: 'Method not allowed' });
   }
 
-  try {
-    const { licenseKey, hardwareId } = req.body;
+  // DEBUG: Log what we received
+  console.log('Request body:', req.body);
+  console.log('Content-Type:', req.headers['content-type']);
 
-    // Validation
-    if (!licenseKey || !hardwareId) {
-      return res.status(400).json({
-        success: false,
-        error: 'Missing licenseKey or hardwareId'
+  try {
+    const { licenseKey, hardwareId } = req.body || {};
+
+    // Validation with detailed error
+    if (!licenseKey) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Missing licenseKey in request body' 
+      });
+    }
+    
+    if (!hardwareId) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Missing hardwareId in request body' 
       });
     }
 
-    // Validate format: INNO-XXXX-XXXX-XXXX
+    // Validate format
     const keyFormat = /^INNO-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$/;
     if (!keyFormat.test(licenseKey)) {
       return res.status(400).json({
@@ -41,67 +48,49 @@ module.exports = async (req, res) => {
       });
     }
 
-    const db = await connectToDatabase();
-    const licenses = db.collection('licenses');
+    // Connect to DB
+    let db;
+    try {
+      db = await connectToDatabase();
+    } catch (dbError) {
+      console.error('Database connection failed:', dbError);
+      return res.status(500).json({
+        success: false,
+        error: 'Database connection failed'
+      });
+    }
 
-    // Find license (case-insensitive)
+    const licenses = db.collection('licenses');
     const license = await licenses.findOne({
       licenseKey: licenseKey.toUpperCase()
     });
 
-    // CASE 1: Not found
     if (!license) {
       return res.status(404).json({
         success: false,
-        error: 'License key not found'
+        error: 'License key not found in database'
       });
     }
 
-    // CASE 2: Expired
     const now = new Date();
+    
+    // Check expiry
     if (now > new Date(license.expiresAt)) {
-      await licenses.updateOne(
-        { _id: license._id },
-        { $set: { status: 'expired' } }
-      );
       return res.status(403).json({
         success: false,
         error: 'License expired'
       });
     }
 
-    // CASE 3: Revoked
-    if (license.status === 'revoked') {
-      return res.status(403).json({
-        success: false,
-        error: 'License revoked'
-      });
-    }
-
-    // CASE 4: Already activated on THIS computer (re-validation)
-    if (license.hardwareId === hardwareId) {
-      const daysRemaining = Math.ceil(
-        (new Date(license.expiresAt) - now) / (1000 * 60 * 60 * 24)
-      );
-      return res.json({
-        success: true,
-        message: 'License validated',
-        tier: license.tier,
-        expiresAt: license.expiresAt,
-        daysRemaining: daysRemaining,
-        isReactivation: true
-      });
-    }
-
-    // CASE 5: Already used on DIFFERENT computer
-    if (license.status === 'used' && license.hardwareId !== hardwareId) {
+    // Check if already used on different device
+    if (license.status === 'used' && license.hardwareId && license.hardwareId !== hardwareId) {
       return res.status(403).json({
         success: false,
         error: 'License already activated on another device'
       });
     }
 
-    // CASE 6: Fresh activation
+    // Activate
     await licenses.updateOne(
       { _id: license._id },
       {
@@ -119,17 +108,16 @@ module.exports = async (req, res) => {
 
     return res.json({
       success: true,
-      message: 'License activated successfully',
       tier: license.tier,
       expiresAt: license.expiresAt,
       daysRemaining: daysRemaining
     });
 
   } catch (error) {
-    console.error('Activation error:', error);
+    console.error('Server error:', error);
     return res.status(500).json({
       success: false,
-      error: 'Server error'
+      error: 'Server error: ' + error.message
     });
   }
 };

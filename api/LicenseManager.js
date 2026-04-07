@@ -1,184 +1,156 @@
-// LicenseManager.js - PRODUCTION VERSION
 (function() {
     'use strict';
-    
+
     class LicenseManager {
         constructor() {
-            this.apiEndpoint = 'https://innofusion4.vercel.app/api';
-            this.localStorageKey = 'innofusion_license_v2'; // Versioned to allow updates
+            this.apiEndpoint = 'https://innofusion-activation.vercel.app/api';
+            this.localStorageKey = 'innofusion_license_v2';
+            console.log('[LicenseManager] Initialized');
         }
-        
-        // Generate unique hardware fingerprint
+
         async getHardwareId() {
-            // Combine multiple browser/system characteristics
-            const components = [
-                navigator.userAgent,
-                screen.width + 'x' + screen.height,
-                screen.colorDepth,
-                navigator.hardwareConcurrency || 'unknown',
-                navigator.platform,
-                new Date().getTimezoneOffset()
-            ];
-            
-            // Create hash
-            const str = components.join('|');
+            const info = navigator.userAgent + screen.width + screen.height;
             let hash = 0;
-            for (let i = 0; i < str.length; i++) {
-                const char = str.charCodeAt(i);
+            for (let i = 0; i < info.length; i++) {
+                const char = info.charCodeAt(i);
                 hash = ((hash << 5) - hash) + char;
-                hash = hash & hash; // Convert to 32bit integer
             }
-            
-            // Add some randomness for CEP environment (Adobe extensions have limited fingerprinting)
-            const randomSuffix = Math.random().toString(36).substring(2, 8).toUpperCase();
-            
-            return `HW-${Math.abs(hash).toString(16).toUpperCase()}-${randomSuffix}`;
+            return 'HW-' + Math.abs(hash).toString(16).toUpperCase();
         }
-        
-        // Validate key format before sending to server
+
         validateFormat(key) {
             return /^INNO-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$/.test(key);
         }
-        
-        // Format user input (add dashes automatically)
-        formatInput(input) {
-            const cleaned = input.toUpperCase().replace(/[^A-Z0-9]/g, '').substring(0, 12);
-            const parts = cleaned.match(/.{1,4}/g) || [];
-            return parts.join('-');
+
+        _post(url, payload) {
+            return new Promise((resolve, reject) => {
+                console.log('[LicenseManager] POST to:', url);
+                
+                // Try fetch first
+                if (typeof fetch !== 'undefined') {
+                    fetch(url, {
+                        method: 'POST',
+                        headers: { 
+                            'Content-Type': 'application/json',
+                            'Accept': 'application/json'
+                        },
+                        body: JSON.stringify(payload)
+                    })
+                    .then(async res => {
+                        console.log('[LicenseManager] Response status:', res.status);
+                        const text = await res.text();
+                        console.log('[LicenseManager] Raw response:', text);
+                        
+                        try {
+                            const data = JSON.parse(text);
+                            resolve(data);
+                        } catch (e) {
+                            reject(new Error('Invalid JSON response: ' + text));
+                        }
+                    })
+                    .catch(err => {
+                        console.warn('[LicenseManager] Fetch failed, trying XHR:', err);
+                        
+                        // XHR Fallback
+                        const xhr = new XMLHttpRequest();
+                        xhr.open('POST', url, true);
+                        xhr.setRequestHeader('Content-Type', 'application/json');
+                        xhr.setRequestHeader('Accept', 'application/json');
+                        xhr.timeout = 10000;
+                        
+                        xhr.onload = () => {
+                            console.log('[LicenseManager] XHR response:', xhr.responseText);
+                            try {
+                                resolve(JSON.parse(xhr.responseText));
+                            } catch(e) {
+                                reject(new Error('Invalid JSON: ' + xhr.responseText));
+                            }
+                        };
+                        
+                        xhr.onerror = () => reject(new Error('Network request failed'));
+                        xhr.ontimeout = () => reject(new Error('Request timeout'));
+                        xhr.send(JSON.stringify(payload));
+                    });
+                } else {
+                    reject(new Error('No HTTP client available'));
+                }
+            });
         }
-        
-        // Main activation method
+
         async activateLicense(key) {
             try {
                 const hardwareId = await this.getHardwareId();
-                
-                const response = await fetch(`${this.apiEndpoint}/activate`, {
-                    method: 'POST',
-                    headers: { 
-                        'Content-Type': 'application/json',
-                        'Accept': 'application/json'
-                    },
-                    body: JSON.stringify({ 
-                        licenseKey: key.toUpperCase().trim(), 
-                        hardwareId: hardwareId 
-                    })
-                });
+                console.log('[LicenseManager] Activating:', key, 'HW:', hardwareId);
 
-                if (!response.ok) {
-                    const errorData = await response.json().catch(() => ({}));
+                const data = await this._post(
+                    this.apiEndpoint + '/activate',
+                    { 
+                        licenseKey: key, 
+                        hardwareId: hardwareId 
+                    }
+                );
+
+                console.log('[LicenseManager] Parsed response:', data);
+
+                // CRITICAL FIX: Always return an object with success property
+                if (!data || typeof data !== 'object') {
+                    console.error('[LicenseManager] Invalid response:', data);
                     return { 
                         success: false, 
-                        error: errorData.error || `Server error: ${response.status}` 
+                        error: 'Invalid response from server' 
                     };
                 }
 
-                const data = await response.json();
-                
                 if (data.success) {
-                    // Save to localStorage with metadata
                     this.saveLicense({
-                        key: key.toUpperCase().trim(),
+                        key: key,
                         hardwareId: hardwareId,
-                        tier: data.tier,
+                        tier: data.tier || 'BASIC',
                         expiresAt: data.expiresAt,
                         activatedAt: new Date().toISOString(),
-                        daysRemaining: data.daysRemaining
+                        daysRemaining: data.daysRemaining || 0
                     });
                 }
-                
-                return data;
-                
+
+                return {
+                    success: !!data.success,
+                    error: data.error || null,
+                    tier: data.tier,
+                    expiresAt: data.expiresAt,
+                    daysRemaining: data.daysRemaining
+                };
+
             } catch (e) {
-                console.error('Activation error:', e);
+                console.error('[LicenseManager] Activation error:', e);
                 return { 
                     success: false, 
-                    error: 'Network error. Check your internet connection.' 
+                    error: 'Network error: ' + e.message 
                 };
             }
         }
-        
-        // Validate existing license (called on startup)
-        async validateExistingLicense() {
-            const saved = this.getSavedLicense();
-            if (!saved) return { valid: false, error: 'No saved license' };
-            
-            try {
-                const response = await fetch(`${this.apiEndpoint}/validate`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        licenseKey: saved.key,
-                        hardwareId: saved.hardwareId
-                    })
-                });
-                
-                const data = await response.json();
-                
-                if (data.valid) {
-                    // Update days remaining
-                    saved.daysRemaining = data.daysRemaining;
-                    this.saveLicense(saved);
-                } else {
-                    // Clear invalid license
-                    this.clearLicense();
-                }
-                
-                return data;
-                
-            } catch (e) {
-                console.error('Validation error:', e);
-                // If offline, check local expiry
-                if (saved.expiresAt && new Date() > new Date(saved.expiresAt)) {
-                    this.clearLicense();
-                    return { valid: false, error: 'License expired (offline check)' };
-                }
-                // Allow offline grace period (7 days)
-                return { valid: true, offline: true, gracePeriod: true };
-            }
-        }
-        
-        // Local storage methods
+
         saveLicense(data) {
             try {
                 localStorage.setItem(this.localStorageKey, JSON.stringify(data));
             } catch (e) {
-                console.error('Failed to save license:', e);
+                console.warn('[LicenseManager] Cannot save:', e);
             }
         }
-        
+
         getSavedLicense() {
             try {
-                const data = localStorage.getItem(this.localStorageKey);
-                return data ? JSON.parse(data) : null;
+                const raw = localStorage.getItem(this.localStorageKey);
+                return raw ? JSON.parse(raw) : null;
             } catch (e) {
                 return null;
             }
         }
-        
+
         clearLicense() {
-            try {
-                localStorage.removeItem(this.localStorageKey);
-            } catch (e) {}
-        }
-        
-        // Get license info for UI display
-        getLicenseInfo() {
-            const saved = this.getSavedLicense();
-            if (!saved) return null;
-            
-            const now = new Date();
-            const expires = new Date(saved.expiresAt);
-            const daysRemaining = Math.ceil((expires - now) / (1000 * 60 * 60 * 24));
-            
-            return {
-                tier: saved.tier,
-                key: saved.key.replace(/.{4}$/, '****'), // Mask last segment
-                expiresAt: saved.expiresAt,
-                daysRemaining: Math.max(0, daysRemaining),
-                isExpired: daysRemaining <= 0
-            };
+            localStorage.removeItem(this.localStorageKey);
         }
     }
 
     window.LicenseManager = LicenseManager;
+    console.log('✓ LicenseManager loaded');
 })();

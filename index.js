@@ -227,27 +227,71 @@
     // ============================================
     // ACTIVATION (Updated for API)
     // ============================================
-    async function handleActivation() {
-        const keyInput = document.getElementById('licenseKey');
-        const btn = document.getElementById('activateBtn');
-        const error = document.getElementById('loginError');
+   async function handleActivation() {
+    const keyInput = document.getElementById('licenseKey');
+    const btn = document.getElementById('activateBtn');
+    const error = document.getElementById('loginError');
 
-        if (!keyInput || !btn) return;
+    if (!keyInput || !btn) return;
 
-        const rawKey = keyInput.value.trim().toUpperCase();
-        console.log('Activating:', rawKey);
+    const rawKey = keyInput.value.trim().toUpperCase();
+    console.log('Activating:', rawKey);
 
-        // UI loading state
-        btn.disabled = true;
-        btn.textContent = 'Activating...';
-        if (error) error.textContent = '';
+    btn.disabled = true;
+    btn.textContent = 'Activating...';
+    if (error) error.textContent = '';
 
-        // Validate format first (client-side)
-        if (!licenseManager.validateFormat(rawKey)) {
+    if (!licenseManager.validateFormat(rawKey)) {
+        btn.disabled = false;
+        btn.textContent = 'Activate';
+        if (error) error.textContent = 'Invalid format. Use: INNO-XXXX-XXXX-XXXX';
+        return;
+    }
+
+    try {
+        const result = await licenseManager.activateLicense(rawKey);
+        
+        // CRITICAL FIX: Check if result exists before accessing properties
+        if (!result) {
+            throw new Error('No response from server');
+        }
+        
+        console.log('Activation result:', result);
+
+        if (result.success) {
+            btn.textContent = '✓ Activated!';
+            btn.style.background = '#2ed573';
+            
+            if (error) {
+                error.style.color = '#2ed573';
+                error.textContent = `${result.tier || 'PRO'} License • Expires in ${result.daysRemaining || '?'} days`;
+            }
+            
+            setTimeout(() => {
+                showMainScreen();
+                updateTierBadge(result.tier);
+                btn.disabled = false;
+                btn.textContent = 'Activate';
+                btn.style.background = '';
+            }, 1500);
+        } else {
             btn.disabled = false;
             btn.textContent = 'Activate';
-            if (error) error.textContent = 'Invalid format. Use: INNO-XXXX-XXXX-XXXX';
-            return;
+            
+            if (error) {
+                error.style.color = '#ff4757';
+                error.textContent = result.error || 'Activation failed';
+            }
+        }
+    } catch (e) {
+        console.error('Activation error:', e);
+        btn.disabled = false;
+        btn.textContent = 'Activate';
+        if (error) {
+            error.style.color = '#ff4757';
+            error.textContent = 'Error: ' + e.message;
+        }
+    }
         }
 
         try {
