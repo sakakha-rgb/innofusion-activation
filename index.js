@@ -225,73 +225,32 @@
     }
 
     // ============================================
-    // ACTIVATION (Updated for API)
+    // ACTIVATION (Fixed - Single Function)
     // ============================================
-   async function handleActivation() {
-    const keyInput = document.getElementById('licenseKey');
-    const btn = document.getElementById('activateBtn');
-    const error = document.getElementById('loginError');
+    async function handleActivation() {
+        const keyInput = document.getElementById('licenseKey');
+        const btn = document.getElementById('activateBtn');
+        const error = document.getElementById('loginError');
 
-    if (!keyInput || !btn) return;
+        if (!keyInput || !btn) return;
 
-    const rawKey = keyInput.value.trim().toUpperCase();
-    console.log('Activating:', rawKey);
+        const rawKey = keyInput.value.trim().toUpperCase();
+        console.log('Activating:', rawKey);
 
-    btn.disabled = true;
-    btn.textContent = 'Activating...';
-    if (error) error.textContent = '';
-
-    if (!licenseManager.validateFormat(rawKey)) {
-        btn.disabled = false;
-        btn.textContent = 'Activate';
-        if (error) error.textContent = 'Invalid format. Use: INNO-XXXX-XXXX-XXXX';
-        return;
-    }
-
-    try {
-        const result = await licenseManager.activateLicense(rawKey);
-        
-        // CRITICAL FIX: Check if result exists before accessing properties
-        if (!result) {
-            throw new Error('No response from server');
+        // UI loading state
+        btn.disabled = true;
+        btn.textContent = 'Activating...';
+        if (error) {
+            error.textContent = '';
+            error.style.color = '#ff4757';
         }
-        
-        console.log('Activation result:', result);
 
-        if (result.success) {
-            btn.textContent = '✓ Activated!';
-            btn.style.background = '#2ed573';
-            
-            if (error) {
-                error.style.color = '#2ed573';
-                error.textContent = `${result.tier || 'PRO'} License • Expires in ${result.daysRemaining || '?'} days`;
-            }
-            
-            setTimeout(() => {
-                showMainScreen();
-                updateTierBadge(result.tier);
-                btn.disabled = false;
-                btn.textContent = 'Activate';
-                btn.style.background = '';
-            }, 1500);
-        } else {
+        // Validate format first (client-side)
+        if (!licenseManager.validateFormat(rawKey)) {
             btn.disabled = false;
             btn.textContent = 'Activate';
-            
-            if (error) {
-                error.style.color = '#ff4757';
-                error.textContent = result.error || 'Activation failed';
-            }
-        }
-    } catch (e) {
-        console.error('Activation error:', e);
-        btn.disabled = false;
-        btn.textContent = 'Activate';
-        if (error) {
-            error.style.color = '#ff4757';
-            error.textContent = 'Error: ' + e.message;
-        }
-    }
+            if (error) error.textContent = 'Invalid format. Use: INNO-XXXX-XXXX-XXXX';
+            return;
         }
 
         try {
@@ -322,6 +281,13 @@
                 result = await licenseManager.activateLicense(rawKey);
             }
 
+            // CRITICAL FIX: Check if result exists before accessing properties
+            if (!result || typeof result !== 'object') {
+                throw new Error('Invalid response from server');
+            }
+            
+            console.log('Activation result:', result);
+
             if (result.success) {
                 // Success!
                 btn.textContent = '✓ Activated!';
@@ -329,7 +295,7 @@
                 
                 if (error) {
                     error.style.color = '#2ed573';
-                    error.innerHTML = `${result.tier} License • Expires in ${result.daysRemaining} days`;
+                    error.textContent = `${result.tier || 'PRO'} License • Expires in ${result.daysRemaining || '?'} days`;
                 }
                 
                 setTimeout(() => {
@@ -342,7 +308,7 @@
                     btn.style.background = '';
                 }, 1500);
             } else {
-                // Failed
+                // Failed - show error from server
                 btn.disabled = false;
                 btn.textContent = 'Activate';
                 
@@ -355,7 +321,10 @@
             console.error('Activation error:', e);
             btn.disabled = false;
             btn.textContent = 'Activate';
-            if (error) error.textContent = 'Network error. Check connection.';
+            if (error) {
+                error.style.color = '#ff4757';
+                error.textContent = 'Network error. Check connection.';
+            }
         }
     }
 
@@ -457,7 +426,6 @@
     // ALL YOUR EXISTING FUNCTIONS (Unchanged)
     // ============================================
     function showEmptyState(message) {
-        // ... keep your existing showEmptyState code exactly as is ...
         const grid = document.getElementById('templateGrid');
         const empty = document.getElementById('emptyState');
 
