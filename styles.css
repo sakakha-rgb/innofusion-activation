@@ -571,3 +571,58 @@ input[type="text"]:focus {
         grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
     }
 }
+/* ── Live Preview (GIF) Support ───────────────────────────────── */
+
+/* Card thumbnail: make position relative so absolute children stack */
+.template-thumbnail {
+    position: relative;
+}
+
+/* Static thumb always visible underneath */
+.card-static-thumb {
+    display: block;
+}
+
+/* GIF overlay: absolutely positioned on top, fades in on hover */
+.card-gif-preview {
+    pointer-events: none; /* clicks pass through to card */
+}
+
+/* Cards with GIF get a subtle teal border hint at rest */
+.template-card.has-gif {
+    border-color: #1a3a35;
+}
+.template-card.has-gif:hover {
+    border-color: var(--accent);
+    box-shadow: 0 10px 30px rgba(0, 212, 170, 0.2);
+}
+
+/* LIVE badge pulse */
+@keyframes livePulse {
+    0%, 100% { opacity: 1; }
+    50%       { opacity: 0.6; }
+}
+.template-card.has-gif:hover [style*="LIVE"] {
+    animation: livePulse 1.4s ease-in-out infinite;
+}
+
+/* Modal live preview badge fade-in */
+.live-preview-badge {
+    transition: opacity 0.3s;
+}
+
+/* Preview placeholder should fill container properly */
+.preview-placeholder {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #000;
+}
+.preview-placeholder img {
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+}
+

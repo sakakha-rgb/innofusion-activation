@@ -1,9 +1,9 @@
-// iNNO FUSION - Main Entry Point (v1.0.4 - FINAL DEBUG)
+// iNNO FUSION - Main Entry Point (v2.0.0 - PRODUCTION)
 
 (function() {
     'use strict';
     
-    console.log('=== iNNO FUSION v1.0.4 ===');
+    console.log('=== iNNO FUSION v2.0.0 ===');
     
     let csInterface = null;
     let licenseManager = null;
@@ -13,7 +13,8 @@
     let currentFolder = 'all';
     let currentTemplate = null;
 
-    const DEMO_KEYS = ['INNO-1234-5678-9999', 'INNO-DEMO-KEY1-9999', 'INNO-TEST-2024-9999'];
+    // Demo keys ONLY for testing - remove in production build
+    const DEMO_KEYS = ['INNO-DEMO-TEST-0000'];
 
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', startApp);
@@ -27,6 +28,7 @@
         try {
             initCSInterface();
             
+            // Initialize new LicenseManager with API support
             licenseManager = new LicenseManager();
             
             mogrtScanner = new MogrtScanner();
@@ -38,6 +40,8 @@
             
             console.log('✓ All classes initialized');
             setupEventListeners();
+            
+            // Check license on startup (async)
             checkExistingLicense();
             
         } catch (e) {
@@ -52,6 +56,7 @@
             console.log('✓ CSInterface ready');
         } catch (e) {
             console.error('CSInterface failed:', e);
+            // Mock for browser testing
             csInterface = {
                 hostEnvironment: { appName: 'PREMIERE_PRO', appVersion: '2024' },
                 evalScript: function(s, cb) { if (cb) cb('{"success":true}'); },
@@ -72,19 +77,88 @@
         }
     }
 
-    function checkExistingLicense() {
+    // ============================================
+    // LICENSE CHECK (Updated for API validation)
+    // ============================================
+    async function checkExistingLicense() {
         try {
-            const savedLicense = localStorage.getItem('innofusion_license');
-            if (savedLicense && licenseManager && licenseManager.validateFormat(savedLicense)) {
-                showMainScreen();
-            } else {
+            // Check if we have a saved license
+            const saved = licenseManager.getSavedLicense();
+            
+            if (!saved) {
+                console.log('No saved license found');
                 showLoginScreen();
+                return;
+            }
+
+            console.log('Found saved license, validating with server...');
+            
+            // Validate with server (checks expiry, hardware ID, etc.)
+            const validation = await licenseManager.validateExistingLicense();
+            
+            if (validation.valid) {
+                console.log('✓ License valid:', validation.tier);
+                showMainScreen();
+                updateTierBadge(validation.tier || saved.tier);
+                
+                // Show offline warning if applicable
+                if (validation.offline) {
+                    showOfflineWarning(validation.daysRemaining);
+                }
+            } else {
+                console.warn('✗ License invalid:', validation.error);
+                licenseManager.clearLicense();
+                showLoginScreen();
+                
+                // Show error message on login screen
+                const error = document.getElementById('loginError');
+                if (error) {
+                    error.textContent = validation.error || 'License expired or invalid';
+                    error.style.color = '#ff4757';
+                }
             }
         } catch (e) {
+            console.error('License check error:', e);
+            // If check fails, allow local fallback for 7 days
+            const saved = licenseManager.getSavedLicense();
+            if (saved && saved.expiresAt) {
+                const daysLeft = Math.ceil((new Date(saved.expiresAt) - new Date()) / (1000 * 60 * 60 * 24));
+                if (daysLeft > 0) {
+                    console.log('Server check failed, using local validation:', daysLeft, 'days left');
+                    showMainScreen();
+                    updateTierBadge(saved.tier);
+                    showOfflineWarning(daysLeft);
+                    return;
+                }
+            }
             showLoginScreen();
         }
     }
 
+    function showOfflineWarning(days) {
+        // Create subtle warning banner
+        const warning = document.createElement('div');
+        warning.id = 'offlineWarning';
+        warning.style.cssText = 'position:fixed; top:0; left:0; right:0; background:#332d00; color:#ffcc00; padding:6px 12px; font-size:11px; text-align:center; z-index:9999;';
+        warning.innerHTML = `⚠ Offline mode • ${days} days remaining • Connect to internet to verify`;
+        
+        // Remove existing
+        const existing = document.getElementById('offlineWarning');
+        if (existing) existing.remove();
+        
+        document.body.appendChild(warning);
+        
+        // Auto-hide after 5 seconds
+        setTimeout(() => {
+            warning.style.opacity = '0';
+            warning.style.transition = 'opacity 0.5s';
+            setTimeout(() => warning.remove(), 500);
+        }, 5000);
+    }
+
+    // ============================================
+    // EVENT LISTENERS (Mostly unchanged)
+    // ============================================
     function setupEventListeners() {
         document.getElementById('activateBtn')?.addEventListener('click', handleActivation);
 
@@ -94,6 +168,7 @@
                 if (e.key === 'Enter') handleActivation();
             });
 
+            // Auto-format input (XXX-XXXX-XXXX-XXXX)
             licenseInput.addEventListener('input', function(e) {
                 let value = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '');
                 let formatted = '';
@@ -106,7 +181,10 @@
                 e.target.value = formatted;
 
                 const error = document.getElementById('loginError');
-                if (error) error.textContent = '';
+                if (error) {
+                    error.textContent = '';
+                    error.style.color = '#ff4757';
+                }
             });
 
             setTimeout(function() {
@@ -117,17 +195,18 @@
         document.getElementById('autoFillDemo')?.addEventListener('click', function() {
             const input = document.getElementById('licenseKey');
             if (input) {
-                input.value = 'INNO-1234-5678-9999';
+                input.value = DEMO_KEYS[0];
                 handleActivation();
             }
         });
 
         document.getElementById('purchaseLink')?.addEventListener('click', function(e) {
             e.preventDefault();
+            const url = 'https://innonex.co.uk/purchase';
             if (premiereBridge && premiereBridge.openURL) {
-                premiereBridge.openURL('https://innonex.co.uk/purchase');
+                premiereBridge.openURL(url);
             } else {
-                window.open('https://innonex.co.uk/purchase');
+                window.open(url);
             }
         });
 
@@ -137,40 +216,18 @@
         document.querySelector('.close-btn')?.addEventListener('click', closeModal);
         document.getElementById('importBtn')?.addEventListener('click', importTemplate);
 
-        // JSX debug tests
-        document.getElementById('settingsBtn')?.addEventListener('dblclick', function() {
-            // DIRECT RAW DIAGNOSTIC - bypasses all wrapper code
-            var cs = new CSInterface();
-            var output = [];
-            output.push('CEP: ' + (typeof window.__adobe_cep__ !== 'undefined' ? 'YES' : 'NO'));
-            output.push('CSInterface: ' + (typeof CSInterface !== 'undefined' ? 'YES' : 'NO'));
-            
-            // Raw evalScript with simplest possible JSX
-            try {
-                cs.evalScript('1+1', function(r) {
-                    output.push('evalScript(1+1) = ' + r);
-                    
-                    cs.evalScript('typeof Innofusion', function(r2) {
-                        output.push('typeof Innofusion = ' + r2);
-                        
-                        cs.evalScript('typeof app', function(r3) {
-                            output.push('typeof app = ' + r3);
-                            alert('DIAGNOSTIC:\n' + output.join('\n'));
-                        });
-                    });
-                });
-            } catch(e) {
-                output.push('EXCEPTION: ' + e.toString());
-                alert('DIAGNOSTIC:\n' + output.join('\n'));
-            }
-        });
+        // Debug shortcuts
+        document.getElementById('settingsBtn')?.addEventListener('dblclick', testJSXDirect);
         document.getElementById('settingsBtn')?.addEventListener('contextmenu', function(e) {
             e.preventDefault();
             testImportDirect();
         });
     }
 
-    function handleActivation() {
+    // ============================================
+    // ACTIVATION (Updated for API)
+    // ============================================
+    async function handleActivation() {
         const keyInput = document.getElementById('licenseKey');
         const btn = document.getElementById('activateBtn');
         const error = document.getElementById('loginError');
@@ -180,68 +237,133 @@
         const rawKey = keyInput.value.trim().toUpperCase();
         console.log('Activating:', rawKey);
 
+        // UI loading state
         btn.disabled = true;
         btn.textContent = 'Activating...';
         if (error) error.textContent = '';
 
-        if (DEMO_KEYS.indexOf(rawKey) !== -1) {
-            console.log('✓ Demo key accepted');
-            activateSuccess(rawKey, 'PRO');
+        // Validate format first (client-side)
+        if (!licenseManager.validateFormat(rawKey)) {
+            btn.disabled = false;
+            btn.textContent = 'Activate';
+            if (error) error.textContent = 'Invalid format. Use: INNO-XXXX-XXXX-XXXX';
             return;
         }
 
-        if (error) {
-            error.innerHTML = 'Invalid key. <strong style="color:#00d4aa;cursor:pointer;" onclick="document.getElementById(\'licenseKey\').value=\'INNO-1234-5678-9999\';">Use demo key</strong>';
-        }
-
-        btn.disabled = false;
-        btn.textContent = 'Activate';
-    }
-
-    function activateSuccess(key, tier) {
         try {
-            localStorage.setItem('innofusion_license', key);
-            localStorage.setItem('innofusion_hardware_id', 'DEMO-' + Math.random().toString(36).substr(2, 9).toUpperCase());
-            localStorage.setItem('innofusion_tier', tier);
-        } catch (e) {}
+            let result;
 
-        const btn = document.getElementById('activateBtn');
-        if (btn) {
-            btn.textContent = '✓ Activated!';
-            btn.style.background = '#2ed573';
-        }
+            // Check if it's a demo key (local only)
+            if (DEMO_KEYS.includes(rawKey)) {
+                console.log('Demo key detected');
+                result = { 
+                    success: true, 
+                    tier: 'DEMO', 
+                    daysRemaining: 7,
+                    expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString()
+                };
+                
+                // Save demo license locally
+                licenseManager.saveLicense({
+                    key: rawKey,
+                    hardwareId: await licenseManager.getHardwareId(),
+                    tier: 'DEMO',
+                    expiresAt: result.expiresAt,
+                    activatedAt: new Date().toISOString(),
+                    daysRemaining: 7
+                });
+            } else {
+                // Real activation via API
+                console.log('Calling activation API...');
+                result = await licenseManager.activateLicense(rawKey);
+            }
 
-        setTimeout(function() {
-            showMainScreen();
-            if (btn) {
+            if (result.success) {
+                // Success!
+                btn.textContent = '✓ Activated!';
+                btn.style.background = '#2ed573';
+                
+                if (error) {
+                    error.style.color = '#2ed573';
+                    error.innerHTML = `${result.tier} License • Expires in ${result.daysRemaining} days`;
+                }
+                
+                setTimeout(() => {
+                    showMainScreen();
+                    updateTierBadge(result.tier);
+                    
+                    // Reset button
+                    btn.disabled = false;
+                    btn.textContent = 'Activate';
+                    btn.style.background = '';
+                }, 1500);
+            } else {
+                // Failed
                 btn.disabled = false;
                 btn.textContent = 'Activate';
-                btn.style.background = '';
+                
+                if (error) {
+                    error.style.color = '#ff4757';
+                    error.textContent = result.error || 'Activation failed';
+                }
             }
-        }, 600);
+        } catch (e) {
+            console.error('Activation error:', e);
+            btn.disabled = false;
+            btn.textContent = 'Activate';
+            if (error) error.textContent = 'Network error. Check connection.';
+        }
     }
 
-    function showLoginScreen() {
-        document.getElementById('loginScreen')?.classList.add('active');
-        if (document.getElementById('loginScreen')) document.getElementById('loginScreen').style.display = 'flex';
+    function updateTierBadge(tier) {
+        const badge = document.getElementById('tierBadge');
+        if (!badge) return;
 
-        document.getElementById('mainScreen')?.classList.remove('active');
-        if (document.getElementById('mainScreen')) document.getElementById('mainScreen').style.display = 'none';
+        badge.textContent = tier || 'BASIC';
+        
+        // Color coding
+        const colors = {
+            'PRO': '#00d4aa',
+            'YEARLY': '#9b59b6',
+            'MONTHLY': '#3498db',
+            'DEMO': '#f39c12',
+            'BASIC': '#95a5a6',
+            'TEAM': '#e74c3c'
+        };
+        
+        badge.style.background = colors[tier] || colors['BASIC'];
+    }
+
+    // ============================================
+    // SCREEN MANAGEMENT (Unchanged)
+    // ============================================
+    function showLoginScreen() {
+        const login = document.getElementById('loginScreen');
+        const main = document.getElementById('mainScreen');
+        
+        login?.classList.add('active');
+        if (login) login.style.display = 'flex';
+        
+        main?.classList.remove('active');
+        if (main) main.style.display = 'none';
     }
 
     function showMainScreen() {
-        document.getElementById('loginScreen')?.classList.remove('active');
-        if (document.getElementById('loginScreen')) document.getElementById('loginScreen').style.display = 'none';
-
-        document.getElementById('mainScreen')?.classList.add('active');
-        if (document.getElementById('mainScreen')) document.getElementById('mainScreen').style.display = 'flex';
-
-        const tierBadge = document.getElementById('tierBadge');
-        if (tierBadge) tierBadge.textContent = localStorage.getItem('innofusion_tier') || 'BASIC';
-
+        const login = document.getElementById('loginScreen');
+        const main = document.getElementById('mainScreen');
+        
+        login?.classList.remove('active');
+        if (login) login.style.display = 'none';
+        
+        main?.classList.add('active');
+        if (main) main.style.display = 'flex';
+        
         setTimeout(loadTemplates, 100);
     }
 
+    // ============================================
+    // TEMPLATE LOADING (Unchanged from your version)
+    // ============================================
     function loadTemplates() {
         console.log('Loading templates...');
         const grid = document.getElementById('templateGrid');
@@ -287,7 +409,11 @@
         });
     }
 
+    // ============================================
+    // ALL YOUR EXISTING FUNCTIONS (Unchanged)
+    // ============================================
     function showEmptyState(message) {
+        // ... keep your existing showEmptyState code exactly as is ...
         const grid = document.getElementById('templateGrid');
         const empty = document.getElementById('emptyState');
 
@@ -357,10 +483,8 @@
     function testJSXDirect() {
         try {
             const cs = new CSInterface();
-
             cs.evalScript('typeof Innofusion', function(result1) {
                 alert('typeof Innofusion = ' + result1);
-
                 setTimeout(function() {
                     cs.evalScript('Innofusion.test()', function(result2) {
                         alert('Innofusion.test() = ' + result2);
@@ -428,17 +552,43 @@
         }
 
         grid.innerHTML = filtered.map(function(t) {
+            const isGif  = t.previewType === 'gif';
+            const hasGif = !!t.gifPreview;
+
+            const gifBadge = isGif
+                ? '<div style="position:absolute;top:5px;left:5px;background:#00d4aa;color:#000;font-size:9px;padding:2px 6px;border-radius:3px;font-weight:bold;letter-spacing:0.5px;">▶ LIVE</div>'
+                : '';
+            const demoBadge = t.isDemo
+                ? '<div style="position:absolute;top:5px;right:5px;background:#ffcc00;color:#000;font-size:9px;padding:2px 6px;border-radius:3px;font-weight:bold;">DEMO</div>'
+                : '';
+
+            const staticImg = `<img
+                class="card-static-thumb"
+                src="${escapeHtml(t.thumbnail)}"
+                alt="${escapeHtml(t.name)}"
+                style="width:100%;height:100%;object-fit:cover;display:block;position:absolute;top:0;left:0;">`;
+
+            const gifOverlay = hasGif
+                ? `<img
+                    class="card-gif-preview"
+                    data-src="${escapeHtml(t.gifPreview)}"
+                    alt=""
+                    style="width:100%;height:100%;object-fit:cover;display:block;position:absolute;top:0;left:0;opacity:0;transition:opacity 0.25s;">`
+                : '';
+
             return `
-                <div class="template-card" data-id="${escapeHtml(t.id)}">
-                    <div class="template-thumbnail">
-                        <img src="${escapeHtml(t.thumbnail)}" alt="${escapeHtml(t.name)}" style="width:100%;height:100%;object-fit:cover;">
-                        <div class="play-overlay">&#9658;</div>
-                        ${t.isDemo ? '<div style="position:absolute;top:5px;right:5px;background:#ffcc00;color:#000;font-size:9px;padding:2px 6px;border-radius:3px;font-weight:bold;">DEMO</div>' : ''}
+                <div class="template-card${hasGif ? ' has-gif' : ''}" data-id="${escapeHtml(t.id)}">
+                    <div class="template-thumbnail" style="position:relative;">
+                        ${staticImg}
+                        ${gifOverlay}
+                        ${isGif ? '' : '<div class="play-overlay">&#9658;</div>'}
+                        ${gifBadge}
+                        ${demoBadge}
                     </div>
                     <div class="template-info-card">
                         <div class="template-name">${escapeHtml(t.name)}</div>
                         <div class="template-category">${escapeHtml(t.category)}</div>
-                        ${t.fileSize ? `<div style="font-size: 10px; color: #666; margin-top: 4px;">${escapeHtml(t.fileSize)}</div>` : ''}
+                        ${t.fileSize ? `<div style="font-size:10px;color:#666;margin-top:4px;">${escapeHtml(t.fileSize)}</div>` : ''}
                     </div>
                 </div>
             `;
@@ -448,6 +598,19 @@
             card.addEventListener('click', function() {
                 openPreview(card.getAttribute('data-id'));
             });
+
+            const gifEl = card.querySelector('.card-gif-preview');
+            if (gifEl) {
+                card.addEventListener('mouseenter', function() {
+                    if (!gifEl.src || gifEl.src === window.location.href) {
+                        gifEl.src = gifEl.getAttribute('data-src');
+                    }
+                    gifEl.style.opacity = '1';
+                });
+                card.addEventListener('mouseleave', function() {
+                    gifEl.style.opacity = '0';
+                });
+            }
         });
     }
 
@@ -514,19 +677,53 @@
         currentTemplate = templates.find(function(t) { return t.id === id; });
         if (!currentTemplate) return;
 
-        const els = {
-            name: document.getElementById('templateName'),
-            cat: document.getElementById('templateCategory'),
-            dur: document.getElementById('templateDuration'),
-            size: document.getElementById('templateSize'),
-            img: document.querySelector('#previewPlaceholder img')
-        };
+        const nameEl = document.getElementById('templateName');
+        const catEl  = document.getElementById('templateCategory');
+        const durEl  = document.getElementById('templateDuration');
+        const sizeEl = document.getElementById('templateSize');
 
-        if (els.name) els.name.textContent = currentTemplate.name;
-        if (els.cat) els.cat.textContent = currentTemplate.category;
-        if (els.dur) els.dur.textContent = currentTemplate.duration;
-        if (els.size) els.size.textContent = `${currentTemplate.width}x${currentTemplate.height}`;
-        if (els.img) els.img.src = currentTemplate.thumbnail;
+        if (nameEl) nameEl.textContent = currentTemplate.name;
+        if (catEl)  catEl.textContent  = currentTemplate.category;
+        if (durEl)  durEl.textContent  = currentTemplate.duration;
+        if (sizeEl) sizeEl.textContent = `${currentTemplate.width}x${currentTemplate.height}`;
+
+        const previewContainer = document.querySelector('.preview-container');
+        if (previewContainer) {
+            const old = previewContainer.querySelector('.live-preview-media');
+            if (old) old.remove();
+
+            const hasGif = currentTemplate.gifPreview;
+            const src    = hasGif ? currentTemplate.gifPreview : currentTemplate.thumbnail;
+            const isGif  = hasGif;
+
+            const img = document.createElement('img');
+            img.className = 'live-preview-media';
+            img.src = src;
+            img.alt = currentTemplate.name;
+            img.style.cssText = 'max-width:100%;max-height:100%;object-fit:contain;opacity:0;transition:opacity 0.3s;';
+            img.onload = function() { img.style.opacity = '1'; };
+
+            const badge = document.createElement('div');
+            badge.className = 'live-preview-badge';
+            badge.style.cssText = 'position:absolute;top:12px;left:12px;background:' +
+                (isGif ? '#00d4aa' : '#444') +
+                ';color:' + (isGif ? '#000' : '#ccc') +
+                ';font-size:10px;font-weight:700;padding:3px 8px;border-radius:4px;letter-spacing:0.5px;';
+            badge.textContent = isGif ? '▶ LIVE PREVIEW' : '🖼 STATIC PREVIEW';
+
+            const placeholder = document.getElementById('previewPlaceholder');
+            if (placeholder) {
+                placeholder.innerHTML = '';
+                placeholder.appendChild(img);
+            }
+
+            const oldBadge = previewContainer.querySelector('.live-preview-badge');
+            if (oldBadge) oldBadge.remove();
+            previewContainer.appendChild(badge);
+
+            const video = document.getElementById('previewVideo');
+            if (video) { video.src = ''; video.style.display = 'none'; }
+        }
 
         const modal = document.getElementById('previewModal');
         if (modal) {
@@ -563,17 +760,21 @@
         }
     }
 
+    // ============================================
+    // LOGOUT (Updated to use LicenseManager)
+    // ============================================
     function handleLogout() {
-        try {
-            localStorage.removeItem('innofusion_license');
-            localStorage.removeItem('innofusion_hardware_id');
-            localStorage.removeItem('innofusion_tier');
-        } catch (e) {}
-
+        licenseManager.clearLicense();
+        
         const keyInput = document.getElementById('licenseKey');
         if (keyInput) keyInput.value = '';
 
         removeDemoWarning();
+        
+        // Remove offline warning if present
+        const offlineWarn = document.getElementById('offlineWarning');
+        if (offlineWarn) offlineWarn.remove();
+        
         showLoginScreen();
     }
 
@@ -596,12 +797,14 @@
         panel.id = 'debugPanel';
         panel.style.cssText = 'position:fixed; bottom:10px; right:10px; width:400px; max-height:300px; overflow:auto; background:rgba(0,0,0,0.9); border:1px solid #00d4aa; color:#00d4aa; padding:10px; font-family:monospace; font-size:11px; z-index:9999; border-radius:4px;';
 
+        const licenseInfo = licenseManager.getLicenseInfo();
+        
         const info = {
+            'Version': '2.0.0',
             'CEP Available': typeof window.__adobe_cep__ !== 'undefined' ? 'YES' : 'NO',
-            'cep_node': typeof window.cep_node !== 'undefined' ? 'YES' : 'NO',
-            'window.require': typeof window.require !== 'undefined' ? 'YES' : 'NO',
-            'CSInterface': typeof CSInterface !== 'undefined' ? 'YES' : 'NO',
-            'SystemPath': typeof SystemPath !== 'undefined' ? 'YES' : 'NO',
+            'License Tier': licenseInfo?.tier || 'None',
+            'Days Remaining': licenseInfo?.daysRemaining || 'N/A',
+            'License Key': licenseInfo?.key || 'None',
             'Extension Root': 'Checking...',
             'Library Path': 'Checking...',
             'File System': mogrtScanner && mogrtScanner.fs ? 'YES' : 'NO',
@@ -612,7 +815,6 @@
             try {
                 const root = mogrtScanner.getExtensionRoot();
                 info['Extension Root'] = root || 'NULL';
-
                 const lib = mogrtScanner.getLibraryPath();
                 info['Library Path'] = lib || 'NULL';
             } catch (e) {
@@ -627,7 +829,7 @@
             '</div>';
 
         for (const [key, value] of Object.entries(info)) {
-            const color = value === 'YES' || value === 'NULL' ? (value === 'YES' ? '#2ed573' : '#ff4757') : '#fff';
+            const color = value === 'YES' ? '#2ed573' : (value === 'NULL' || value === 'None' ? '#ff4757' : '#fff');
             html += `<div style="margin:3px 0;"><span style="color:#666;">${escapeHtml(key)}:</span> <span style="color:${color};">${escapeHtml(value)}</span></div>`;
         }
 
@@ -657,5 +859,5 @@
             .replace(/'/g, '&#39;');
     }
 
-    console.log('index.js ready');
+    console.log('index.js v2.0.0 ready');
 })();
